@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 require dirname(__DIR__) . "/vendor/autoload.php";
 
-// To enable the error handler
 set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
 
 $path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
@@ -20,17 +23,14 @@ if ($resource != "tasks") {
     exit;
 }
 
-// All response bodies in our API will be formatted as JSON, so we can safely put it inside
-// the front controller.
 header("Content-Type: application/json; charset=UTF-8");
 
-$controller = new TaskController;
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+// When we create an object of the controller class we need to pass in an object of the
+// `TaskGateway` class.
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
 
 $controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
-
-
-
-
-
-
-
