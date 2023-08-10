@@ -1017,6 +1017,1771 @@ If we call the GET method on an individual task with an id that exists we will g
 
 If the result does not exist, e.g. giving an incorrect id parameter, we should be showing a 404 status code as well as a useful body response.
 
+Inside `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+                echo "create";
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+}
+```
+
+# Create, update and delete individual resources
+
+## Get the data from the request as JSON
+
+At the moment we can read multiple records from the database using our API or an individual record with the ID supplied.
+
+Now we can move to creating, updating and deleting records.
+
+We will start with creating a new resource.
+
+The endpoint to creating a resource is the same as getting a list, e.g. `api/tasks` but with the `POST` request method instead of `GET`.
+
+Inside `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                // In a regular web application, if you have a form that uses the POST method, you get the
+                // data from the form in the $_POST array.
+                
+                // Print out the content of this array
+
+                print_r($_POST);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+}
+```
+
+Let's make a `POST` request to the `/tasks` endpoint using httpie. To pass data in the request body we include key/value pairs at the end of the request. If a string value contains a space we need to enclose it in quotes.
+
+When the below is run in the terminal we get an empty array back. This is because by default HTTPie is expecting the request body to be JSON.
+
+`http post http://localhost:8000/api/tasks name="A new task" priority=3`
+
+![img.png](post-request.png)
+
+We can specify that the body should be a regular form with the `--form` option, e.g.
+`http post http://localhost:8000/api/tasks name="A new task" priority=3 --form`
+
+With that, the POST array is populated, and we see those values printed out.
+
+![img.png](post-request-form.png)
+
+However, it's more common for APIs to accept JSON as the input, as well as the output so this is what we will do in our API.
+
+We cannot get this data from the POST array, so we have to get it directly from the request body. We can do this with the `php//input` stream.
+
+Inside `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                // Instead of printing out the $_POST array, we call the ` file_get_contents` method
+                echo file_get_contents("php://input");
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+}
+```
+
+Now when we make a request without the `--form` option we see the data we passed formatted as JSON.
+
+![img.png](post-request-json.png)
+
+Note that HTTPie automatically encodes these values as JSON when it sends the request.
+
+If using Postman, we need to write the JSON ourselves in the body of the request
+
+![img.png](postman-post-request.png)
+
+Instead of printing the data out we can pass the `json_decode` function to get an associative array
+
+```php
+// Taskcontroller.php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = json_decode(file_get_contents("php://input"));
+
+                var_dump($data);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+}
+```
+
+Using HTTPie, we get an associative array of data
+
+![img.png](assoc-array.png)
+
+If we make the same request with no data the output will be `NULL`, whether in HTTPie or Postman.
+We will typecast the return value into an array, so when it is null it will be converted to an empty array.
+
+`TaskController.php`
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                // Typecast to array to avoid an output of NULL
+                
+                $data = (array) json_decode(file_get_contents("php://input"));
+
+                var_dump($data);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+}
+```
+
+With HTTPie, the priority value has been sent as a string. To use raw JSON data types like numbers, we need to include a colon before the equal sign.
+
+`http post http://localhost:8000/api/tasks name="A new task" priority:=3`
+
+Now the decoded JSON will contain the number as an integer.
+
+Using this code, we can get the equivalent of the `$_POST` array but for JSON in the request body.
+
+## Insert a record into the database and respond with a 201 status code
+
+We can now insert the data into the database.
+
+First we need to add a `create` method inside the `TaskGateway.php` file.
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // order by name as we have an index on the name column
+    public function getAll(): array
+    {
+        $sql = "SELECT *
+                FROM task
+                ORDER BY name";
+
+        $stmt = $this->conn->query($sql);
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function get(string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function create(array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed)
+                VALUES (:name, :priority, :is_completed)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        // Return the ID of the inserted record
+        return $this->conn->lastInsertId();
+    }
+}
+```
+
+Inside `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                // Call the create method and pass in the array of data
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    // The correct status code to return when we have created a resource is 201
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+}
+```
+
+When making a POST request, we expect the status to be 201.
+
+![img.png](201status.png)
+
+## Make a generic error handler to output warnings as JSON
+
+We can now create new records, but if we don't post any data we will get a warning telling us there is an undefined array key. The content of the error message is formatted as HTML and not JSON and we need to fix that.
+
+![img.png](html-error.png)
+
+In `Errorhandler.php`
+
+```php
+<?php
+
+class ErrorHandler
+{
+    public static function handleError(
+        int $errno,
+        string $errstr,
+        string $errfile,
+        int $errline): void
+    {
+        throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+    }
+    public static function handleException(Throwable $exception): void
+    {
+        // Add generic server error
+        http_response_code(500);
+
+        echo json_encode([
+            "code" => $exception->getCode(),
+            "message" => $exception->getMessage(),
+            "file" => $exception->getFile(),
+            "line" => $exception->getLine()
+        ]);
+    }
+}
+```
+
+Then we call the `set_error_handler` function inside of `index.php` and pass in the `handleError` method.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+header("Content-Type: application/json; charset=UTF-8");
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+// When we create an object of the controller class, we need to pass in an object of the
+// `TaskGateway` class.
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
+
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+Now, when making the same request, the warning is encoded in JSON and not HTML
+
+![img.png](json-error.png)
+
+## Validate the data and respond with a 422 status code if invalid
+
+Now that we output the warning as JSON, it is time to fix it.
+Before we process a request to add a new record, we need to validate it.
+
+Inside of `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    private function getValidationErrors(array $data): array
+    {
+        $errors = [];
+
+        if (empty($data["name"])) {
+
+            $errors[] = "Name is required"
+
+;        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+Now we have validation when passing incorrect data.
+
+![img.png](422-validation-error.png)
+
+## Conditionally validate the data when updating an existing record
+
+Now we will add the functionality to update an existing task.
+
+First, we need to get the data from the request and validate it.
+We are already doing this when creating a new record,
+so we can copy the following statements from the POST method inside of `TaskController.php`
+
+```php
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+```
+
+and add it to the `PATCH method` inside the same file
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                    $errors = $this->getValidationErrors($data);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+                    
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    private function getValidationErrors(array $data): array
+    {
+        $errors = [];
+
+        if (empty($data["name"])) {
+
+            $errors[] = "Name is required"
+
+;        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+This will get the data from the request to validate it and return a 422 status if the data is valid. If we now want to update only part of the task, e.g., the priority, we will get a validation error because the name is required.
+
+We need to change the code so that the validation depends on whether we are creating a new record or updating an existing one. This will be done inside `TaskController.php`'s `getValidationErrors` method.
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                    // Passing false as the second argument indicates that the record
+                    //already exists.
+                    $errors = $this->getValidationErrors($data, false);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+
+                    echo "update $id";
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    // The `bool $is_new = true` default means we don't have to change the existing code
+    // where we are calling this method when we create a new record.
+    private function getValidationErrors(array $data, bool $is_new = true): array
+    {
+        $errors = [];
+
+        // Now the name is only required if the record is new.
+        if ($is_new && empty($data["name"])) {
+
+            $errors[] = "Name is required"
+
+;        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+## Get the data from the request when updating
+
+Since we have valid data for updating a record, we can now update it inside our database.
+
+Inside of `TaskGateway.php` we will create a new `update` method
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // order by name as we have an index on the name column
+    public function getAll(): array
+    {
+        $sql = "SELECT *
+                FROM task
+                ORDER BY name";
+
+        $stmt = $this->conn->query($sql);
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function get(string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function create(array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed)
+                VALUES (:name, :priority, :is_completed)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        // Default value of false if not set
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        // Return the ID of the inserted record
+        return $this->conn->lastInsertId();
+    }
+
+    // Generate the SQL based on the fields passed in the request
+    public function update(string $id, array $data): array
+    {
+        $fields = [];
+
+        if ( !empty($data["name"])) {
+
+            $fields["name"] = [
+                $data["name"],
+                PDO::PARAM_STR
+            ];
+        }
+
+        if (array_key_exists("priority", $data)) {
+
+            $fields["priority"] = [
+                $data["priority"],
+                $data["priority"] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            ];
+        }
+
+        if (array_key_exists("is_completed", $data)) {
+
+            $fields["is_completed"] = [
+                $data["is_completed"],
+                PDO::PARAM_BOOL
+            ];
+        }
+        
+        print_r($fields);
+        exit;
+    }
+}
+```
+
+Then inside `TaskController.php` we replace the placeholder code inside of `PATCH` with the `update` method
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+                    
+                    $errors = $this->getValidationErrors($data, false);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+
+                    // Replace placeholder code with update method
+                    $this->gateway->update($id, $data);
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
 
 
+    private function getValidationErrors(array $data, bool $is_new = true): array
+    {
+        $errors = [];
 
+        if ($is_new && empty($data["name"])) {
+
+            $errors[] = "Name is required";        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+## Update the record in the database and return a 200 status code
+
+Inside `TaskGateway.php`
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // order by name as we have an index on the name column
+    public function getAll(): array
+    {
+        $sql = "SELECT *
+                FROM task
+                ORDER BY name";
+
+        $stmt = $this->conn->query($sql);
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function get(string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function create(array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed)
+                VALUES (:name, :priority, :is_completed)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        // Default value of false if not set
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        // Return the ID of the inserted record
+        return $this->conn->lastInsertId();
+    }
+
+    // Generate the SQL based on the fields passed in the request
+    public function update(string $id, array $data): int
+    {
+        $fields = [];
+
+        if (!empty($data["name"])) {
+
+            $fields["name"] = [
+                $data["name"],
+                PDO::PARAM_STR
+            ];
+        }
+
+        if (array_key_exists("priority", $data)) {
+
+            $fields["priority"] = [
+                $data["priority"],
+                $data["priority"] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            ];
+        }
+
+        if (array_key_exists("is_completed", $data)) {
+
+            $fields["is_completed"] = [
+                $data["is_completed"],
+                PDO::PARAM_BOOL
+            ];
+        }
+
+        if (empty($fields)) {
+            
+            return 0;
+
+        } else {
+
+            $sets = array_map(function ($value) {
+
+                return "$value = :$value";
+
+            }, array_keys($fields));
+
+            $sql = "UPDATE task"
+                . " SET " . implode(", ", $sets)
+                . " WHERE id = :id";
+
+            $stmt = $this->conn->prepare($sql);
+            
+            $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+            
+            foreach ($fields as $name => $values) {
+                $stmt->bindValue(":$name", $values[0], $values[1]);
+            }
+            $stmt->execute();
+            
+            return $stmt->rowCount();
+        }
+    }
+}
+```
+
+In `TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+    public function __construct(private TaskGateway $gateway)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAll());
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                    $errors = $this->getValidationErrors($data, false);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+
+                    // We now return the number of rows
+                    $rows = $this->gateway->update($id, $data);
+                    echo json_encode(["message" => "Task updated", "rows" => $rows]);
+                    break;
+
+                case "DELETE":
+                    echo "delete $id";
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    // The `bool $is_new = true` default means we don't have to change the existing code
+    // where we are calling this method when we create a new record.
+    private function getValidationErrors(array $data, bool $is_new = true): array
+    {
+        $errors = [];
+
+        // Now the name is only required if the record is new.
+        if ($is_new && empty($data["name"])) {
+
+            $errors[] = "Name is required"
+
+;        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+## Delete the record in the database and return a 200 status code
+
+The final CRUD operation we need to perform is to delete a resource.
+
+We start by adding a method called `delete` to the `TaskGateway` class
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // order by name as we have an index on the name column
+    public function getAll(): array
+    {
+        $sql = "SELECT *
+                FROM task
+                ORDER BY name";
+
+        $stmt = $this->conn->query($sql);
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function get(string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function create(array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed)
+                VALUES (:name, :priority, :is_completed)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        // Default value of false if not set
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        // Return the ID of the inserted record
+        return $this->conn->lastInsertId();
+    }
+
+    // Generate the SQL based on the fields passed in the request
+    public function update(string $id, array $data): int
+    {
+        $fields = [];
+
+        if (!empty($data["name"])) {
+
+            $fields["name"] = [
+                $data["name"],
+                PDO::PARAM_STR
+            ];
+        }
+
+        if (array_key_exists("priority", $data)) {
+
+            $fields["priority"] = [
+                $data["priority"],
+                $data["priority"] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            ];
+        }
+
+        if (array_key_exists("is_completed", $data)) {
+
+            $fields["is_completed"] = [
+                $data["is_completed"],
+                PDO::PARAM_BOOL
+            ];
+        }
+
+        if (empty($fields)) {
+
+            return 0;
+
+        } else {
+
+            $sets = array_map(function ($value) {
+
+                return "$value = :$value";
+
+            }, array_keys($fields));
+
+            $sql = "UPDATE task"
+                . " SET " . implode(", ", $sets)
+                . " WHERE id = :id";
+
+            $stmt = $this->conn->prepare($sql);
+
+            $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+            foreach ($fields as $name => $values) {
+                $stmt->bindValue(":$name", $values[0], $values[1]);
+            }
+            $stmt->execute();
+
+            return $stmt->rowCount();
+        }
+    }
+    
+    public function delete(string $id): int
+    {
+        $sql = "DELETE FROM task
+                WHERE id = :id";
+        
+        $stmt = $this->conn->prepare($sql);
+        
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+        
+        $stmt->execute();
+        
+        return $stmt->rowCount();
+    }
+}
+```
