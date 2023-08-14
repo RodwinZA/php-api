@@ -1,4 +1,4 @@
-# Create a RESTful API: build a framework for serving the API
+_# Create a RESTful API: build a framework for serving the API
 
 ## Start writing the API: enable URL rewriting
 
@@ -526,11 +526,11 @@ If we have an error in our DB connection, here are some examples of the output f
 
 ### Postman
 
-![img.png](postman-db-error.png)
+![img.png](reamdme-imgs/postman-db-error.png)
 
 ### HTTPie
 
-![img.png](httpie-db-error.png)
+![img.png](reamdme-imgs/httpie-db-error.png)
 
 Fixing the password will resolve the issue.
 
@@ -817,7 +817,7 @@ SELECT * FROM task;
 
 Now when running the GET request we can see the data formatted as JSON.
 
-![img.png](data.png)
+![img.png](reamdme-imgs/data.png)
 
 ## Configure PDO to prevent numeric values from being converted to strings
 
@@ -893,7 +893,7 @@ class TaskGateway
 
 Now the values for the `is_completed` column are shown as boolean literals inside JSON.
 
-![img.png](boolean-literals.png)
+![img.png](reamdme-imgs/boolean-literals.png)
 
 ## Show an individual record
 
@@ -1011,7 +1011,7 @@ class TaskController
 
 If we call the GET method on an individual task with an id that exists we will get its contents. Else the output will simply be `false`.
 
-![img.png](single-task.png)
+![img.png](reamdme-imgs/single-task.png)
 
 ## Respond with a 404 status code if the resource with the specified ID is not found
 
@@ -1180,14 +1180,14 @@ When the below is run in the terminal we get an empty array back. This is becaus
 
 `http post http://localhost:8000/api/tasks name="A new task" priority=3`
 
-![img.png](post-request.png)
+![img.png](reamdme-imgs/post-request.png)
 
 We can specify that the body should be a regular form with the `--form` option, e.g.
 `http post http://localhost:8000/api/tasks name="A new task" priority=3 --form`
 
 With that, the POST array is populated, and we see those values printed out.
 
-![img.png](post-request-form.png)
+![img.png](reamdme-imgs/post-request-form.png)
 
 However, it's more common for APIs to accept JSON as the input, as well as the output so this is what we will do in our API.
 
@@ -1267,13 +1267,13 @@ class TaskController
 
 Now when we make a request without the `--form` option we see the data we passed formatted as JSON.
 
-![img.png](post-request-json.png)
+![img.png](reamdme-imgs/post-request-json.png)
 
 Note that HTTPie automatically encodes these values as JSON when it sends the request.
 
 If using Postman, we need to write the JSON ourselves in the body of the request
 
-![img.png](postman-post-request.png)
+![img.png](reamdme-imgs/postman-post-request.png)
 
 Instead of printing the data out we can pass the `json_decode` function to get an associative array
 
@@ -1351,7 +1351,7 @@ class TaskController
 
 Using HTTPie, we get an associative array of data
 
-![img.png](assoc-array.png)
+![img.png](reamdme-imgs/assoc-array.png)
 
 If we make the same request with no data the output will be `NULL`, whether in HTTPie or Postman.
 We will typecast the return value into an array, so when it is null it will be converted to an empty array.
@@ -1614,13 +1614,13 @@ class TaskController
 
 When making a POST request, we expect the status to be 201.
 
-![img.png](201status.png)
+![img.png](reamdme-imgs/201status.png)
 
 ## Make a generic error handler to output warnings as JSON
 
 We can now create new records, but if we don't post any data we will get a warning telling us there is an undefined array key. The content of the error message is formatted as HTML and not JSON and we need to fix that.
 
-![img.png](html-error.png)
+![img.png](reamdme-imgs/html-error.png)
 
 In `Errorhandler.php`
 
@@ -1696,7 +1696,7 @@ $controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
 
 Now, when making the same request, the warning is encoded in JSON and not HTML
 
-![img.png](json-error.png)
+![img.png](reamdme-imgs/json-error.png)
 
 ## Validate the data and respond with a 422 status code if invalid
 
@@ -1820,7 +1820,7 @@ class TaskController
 
 Now we have validation when passing incorrect data.
 
-![img.png](422-validation-error.png)
+![img.png](reamdme-imgs/422-validation-error.png)
 
 ## Conditionally validate the data when updating an existing record
 
@@ -2782,6 +2782,1329 @@ class TaskGateway
         $stmt->execute();
         
         return $stmt->rowCount();
+    }
+}
+```
+
+# API key authorization
+
+## Create a table to store user account data
+
+At the moment, access to our API is unrestricted. While some APIs are open like this, many APIs require authentication. We will add authentication to our API, requiring an API key to use it.
+
+An API key is simply a unique string of characters that identify a user account. We will store these keys inside a new table in the `api_db` database. In addition to the API key, we will add a web interface that contains a simple register page for signing up for a new user account. When a user registers we will generate a new API key for their account and store it with their user details.
+
+To access the API they will need to send this API key along with each request.
+
+We will first create a new table in the database to store user accounts.
+
+```sql
+CREATE TABLE user (id INT NOT NULL AUTO_INCREMENT, name VARCHAR(128) NOT NULL, username VARCHAR(128) NOT NULL, password_hash VARCHAR(255) NOT NULL, api_key VARCHAR(32) NOT NULL, PRIMARY KEY (id), UNIQUE (username),  UNIQUE (api_key));
+```
+
+We insert a `password_hash` column to secure the passwords of users stored in a database.
+The documentation suggests it uses a 255 character-limit.
+
+The `username` and `api_key` will be unique so they can be used in `WHERE` clauses.
+
+This is a simplified schema for a user account. In a full system you would probably have additional fields like email, surname, etc.
+
+## Add a register page to insert a new user record and generate a new API key
+
+Instead of inside the `www/api/` sub-folder, we will add our `register.php` page inside the root directory of the project.
+This will be a simplified file with no validation or error handling.
+
+```php
+<?php
+
+// Autoload classes in the project
+require __DIR__ . "/vendor/autoload.php";
+
+if ($_SERVER["REQUEST_METHOD"] === "POST") {
+
+    // Connect to the database using existing database class
+
+    // Specify the current folder as the location of the dotenv file
+    $dotenv = \Dotenv\Dotenv::createImmutable(__DIR__);
+    $dotenv->load();
+
+    $database = new Database(
+            $_ENV["DB_HOST"],
+            $_ENV["DB_NAME"],
+            $_ENV["DB_USER"],
+            $_ENV["DB_PASS"]
+    );
+
+    $conn = $database->getConnection();
+
+    $sql = "INSERT INTO user (name, username, password_hash, api_key)
+            VALUES (:name, :username, :password_hash, :api_key)";
+
+    $stmt = $conn->prepare($sql);
+
+    // Hash the password before storing it in the database
+    $password_hash = password_hash($_POST["password"], PASSWORD_DEFAULT);
+
+    // Generate an API key
+    $api_key = bin2hex(random_bytes(16));
+
+
+    // Bind values for the placeholders
+    $stmt->bindValue(":name", $_POST["name"], PDO::PARAM_STR);
+    $stmt->bindValue(":username", $_POST["username"], PDO::PARAM_STR);
+    $stmt->bindValue(":password_hash", $password_hash, PDO::PARAM_STR);
+    $stmt->bindValue(":api_key", $api_key, PDO::PARAM_STR);
+
+    $stmt->execute();
+
+    echo "Thank you for registering. Your API key is " . $api_key;
+}
+
+?>
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Document</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+</head>
+<body>
+
+<main class="container">
+    <h1>Register</h1>
+
+    <form method="post">
+        <label for="name">
+            Name
+            <input type="text" name="name" id="name">
+        </label>
+
+        <label for="username">
+            Username
+            <input type="text" name="username" id="username">
+        </label>
+
+        <label for="password">
+            Password
+            <input type="password" name="password" id="password">
+        </label>
+
+        <button>Register</button>
+    </form>
+</main>
+</body>
+</html>
+```
+
+## Send the API key with the request: query string or request header
+
+We can now start the process of requiring an API key to make requests to our API.
+
+First, we need to send the API key with the request. One way to do this is to pass it in using the query string, which is what some APIs actually do.
+
+In the front controller of the API, `api/index.php`
+we will assign the value from the `$_GET` super global for a key of "api-key" to a variable called `$api_key`
+
+```php
+...
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+$api_key = $_GET["api-key"];
+
+echo $api_key;
+exit;
+...
+```
+
+Before making the request we will add a query string with the value for the api key.
+`http http://localhost:8000/api/tasks?api-key=2332dwde`
+
+![img.png](reamdme-imgs/img.png)
+
+Here we are passing in the api key as part of the url.
+But it is more common to use the request headers to pass authentication details.
+This makes the request clearer as we are not passing values to the url.
+
+There are no standards in this regard, but it is common to use a header with a key called `X-API-Key`. Request headers in PHP are available in the `$_SERVER` superglobal.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+// Get the value of the api key from the server array directly
+$api_key = $_SERVER["HTTP_X_API_KEY"];
+
+echo $api_key;
+
+//  http http://localhost:8000/api/tasks X-API-KEY:abc123
+// output : abc123
+
+exit;
+
+header("Content-Type: application/json; charset=UTF-8");
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+// When we create an object of the controller class we need to pass in an object of the
+// `TaskGateway` class.
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
+
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+## Check the API key is present in the request and return 400 if not
+
+If we send an empty value for the header or don't send the header at all we get an undefined array key error.
+
+![img_1.png](reamdme-imgs/img_1.png)
+
+To make the API more robust, we need to check that the api key is present and respond accordingly if not. If not, we need to respond with a 400 Bad Request. Our API requires a specific request header for authentication. Without it, the request can't be processed.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "Missing API key"]);
+    exit;
+}
+// Get the value of the api key from the server array directly
+$api_key = $_SERVER["HTTP_X_API_KEY"];
+
+echo $api_key;
+
+//  http http://localhost:8000/api/tasks X-API-KEY:abc123
+// output : abc123
+
+exit;
+
+header("Content-Type: application/json; charset=UTF-8");
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+// When we create an object of the controller class, we need to pass in an object of the
+// `TaskGateway` class.
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
+
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+## Create a table data gateway class for the user table
+
+To authenticate the request we need to compare the api key in the request to the ones we have in the database. This means looking up a user record based on the api_key column.
+
+We will add a new class, `src/UserGateway.php` to do this.
+
+```php
+<?php
+
+class UserGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+    
+    public function getByAPIKey(string $key): array | false
+    {
+        // We only need the API key to authenticate the request so we
+        // don't use the password or username yet
+        $sql = "SELECT * FROM user WHERE api_key = :api_key";
+        
+        $stmt = $this->conn->prepare($sql);
+        $stmt->bindValue(":api_key", $key, PDO::PARAM_STR);
+        $stmt->execute();
+        
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+}
+```
+
+In the front controller, we need to move the code to create the database up in the order, then create a new object of teh `UserGateway` class, passing in the database object it depends on.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "Missing API key"]);
+    exit;
+}
+
+$api_key = $_SERVER["HTTP_X_API_KEY"];
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+echo $api_key;
+
+exit;
+
+header("Content-Type: application/json; charset=UTF-8");
+
+
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
+
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+## Authenticate the API key and return a 401 status code if invalid
+
+Now we can check the value of the API key coming from the request. Instead of outputting the API value and exiting the script inside `index.php` with
+
+```php
+...
+echo $api_key;
+
+exit;
+...
+```
+
+we will call the `getByAPIKey` method on the user gateway object, passing in the API key
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+
+$dotenv->load();
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "Missing API key"]);
+    exit;
+}
+
+$api_key = $_SERVER["HTTP_X_API_KEY"];
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+// Call the getByAPIKey method.
+// If this returns an array, then a record was found that matches the API key.
+//If it returns false, the request is not authenticated.
+
+if ($user_gateway->getByAPIKey($api_key) === false) {
+
+    http_response_code(401);
+    echo json_encode(["message" => "Invalid API Key"]);
+    exit;
+}
+
+header("Content-Type: application/json; charset=UTF-8");
+
+
+$task_gateway = new TaskGateway($database);
+
+$controller = new TaskController($task_gateway);
+
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+Now, when making a request, e.g.
+`http http://localhost:8000/api/tasks X-API-KEY:{real_api_key}`
+
+for an existing API key the api will return a list of tasks, else it will output a 401 error.
+
+## Refactor the front controller to a bootstrap file and Auth class
+
+Let's simplify the code to stop all requests from simply moving through the front controller.
+
+In the `api` folder we create a new file called `bootstrap.php` and move the autoloader,
+error handling and Dotenv object from the front controller.
+
+```php
+require dirname(__DIR__) . "/vendor/autoload.php";
+
+set_error_handler("ErrorHandler::handleError");
+set_exception_handler("ErrorHandler::handleException");
+
+$dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+$dotenv->load();
+
+header("Content-Type: application/json; charset=UTF-8");
+
+```
+
+And inside `index.php` require the bootstrap file.
+`require __DIR__ . "/bootstrap.php";`
+
+Extract the authentication code into a separate class called `src/Auth.php`,
+
+```php
+<?php
+
+class Auth
+{
+    public function __construct(private UserGateway $user_gateway)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        if ($this->user_gateway->getByAPIKey($api_key) === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+        return true;
+    }
+}
+```
+
+Then inside the front controller:
+
+```php
+$user_gateway = new UserGateway($database);
+
+$auth = new Auth($user_gateway);
+
+if ( ! $auth->authenticateAPIKey()) {
+    exit;
+}
+
+$task_gateway = new TaskGateway($database);
+```
+
+## Add a foreign key relationship to link task records to user records
+
+When we authenticate using an API key, that key is specific to a particular user. At the moment, any user can access any task record using the endpoints. We will change that so the tasks are linked to individual users.
+
+To add a foreign key to the `tasks` table:
+
+```sql
+ALTER TABLE task
+ADD user_id INT NOT NULL,
+ADD INDEX (user_id);
+```
+
+Instead of a value of `0` on all `user_id`'s we will set them to that of an existing user. We have one user with the `id` of one so that is what we will use.
+
+```sql
+UPDATE task SET user_id = 1;
+```
+
+Finally, let's add a foreign key relation to the `task` table.
+
+```sql
+ALTER TABLE task ADD FOREIGN KEY (user_id) REFERENCES user(id)
+ON DELETE CASCADE ON UPDATE CASCADE;
+```
+
+## Retrieve the ID of the authenticated user when authenticating
+
+We can now restrict task records to the currently authenticated user in the api.
+
+First, let's get the ID of the current user. Inside `src/Auth.php`:
+
+```php
+
+<?php
+
+class Auth
+{
+    // Store current user id
+    private int $user_id;
+    public function __construct(private UserGateway $user_gateway)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        // Instead of comparing the return value directly, we assign the
+        // value to a variable and return that.
+
+        $user = $this->user_gateway->getByAPIKey($api_key);
+
+        if ( $user === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+
+        // If auth is successful, assign user_id to the property
+        $this->user_id = $user["id"];
+
+        return true;
+    }
+
+    public function getUserID(): int
+    {
+        return $this->user_id;
+    }
+}
+
+```
+
+Let's call the method in the front controller
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+$auth = new Auth($user_gateway);
+
+if ( ! $auth->authenticateAPIKey()) {
+    exit;
+}
+
+// AFTER authenticating API key get user's ID
+$user_id = $auth->getUserID();
+
+var_dump($user_id);
+exit;
+
+$task_gateway = new TaskGateway($database);
+$controller = new TaskController($task_gateway);
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+At the moment, we only print out the authenticated user's ID.
+
+## Retrieve the ID of the authenticated user when authenticating
+
+`TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+
+    // Add new integer argument for user id, prefixed with private
+    // to promote it to a property.
+    public function __construct(private TaskGateway $gateway,
+                                private int $user_id)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAllForUser($this->user_id));
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->create($data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->get($id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                    $errors = $this->getValidationErrors($data, false);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+
+                    // We now return the number of rows
+                    $rows = $this->gateway->update($id, $data);
+                    echo json_encode(["message" => "Task updated", "rows" => $rows]);
+                    break;
+
+                case "DELETE":
+                    $rows = $this->gateway->delete($id);
+                    echo json_encode(["message" => "Task deleted", "rows" => $rows]);
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    private function getValidationErrors(array $data, bool $is_new = true): array
+    {
+        $errors = [];
+
+        // Now the name is only required if the record is new.
+        if ($is_new && empty($data["name"])) {
+
+            $errors[] = "Name is required";
+        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+`TaskGateway.php`
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // Now only for a specific user
+    public function getAllForUser(int $user_id): array
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE user_id = :user_id
+                ORDER BY name";
+
+        // As we are using a prepared statement, we need to change the query statement
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function get(string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function create(array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed)
+                VALUES (:name, :priority, :is_completed)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        // Default value of false if not set
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+
+        $stmt->execute();
+
+        // Return the ID of the inserted record
+        return $this->conn->lastInsertId();
+    }
+
+    // Generate the SQL based on the fields passed in the request
+    public function update(string $id, array $data): int
+    {
+        $fields = [];
+
+        if (!empty($data["name"])) {
+
+            $fields["name"] = [
+                $data["name"],
+                PDO::PARAM_STR
+            ];
+        }
+
+        if (array_key_exists("priority", $data)) {
+
+            $fields["priority"] = [
+                $data["priority"],
+                $data["priority"] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            ];
+        }
+
+        if (array_key_exists("is_completed", $data)) {
+
+            $fields["is_completed"] = [
+                $data["is_completed"],
+                PDO::PARAM_BOOL
+            ];
+        }
+
+        if (empty($fields)) {
+
+            return 0;
+
+        } else {
+
+            $sets = array_map(function ($value) {
+
+                return "$value = :$value";
+
+            }, array_keys($fields));
+
+            $sql = "UPDATE task"
+                . " SET " . implode(", ", $sets)
+                . " WHERE id = :id";
+
+            $stmt = $this->conn->prepare($sql);
+
+            $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+            foreach ($fields as $name => $values) {
+                $stmt->bindValue(":$name", $values[0], $values[1]);
+            }
+            $stmt->execute();
+
+            return $stmt->rowCount();
+        }
+    }
+
+    public function delete(string $id): int
+    {
+        $sql = "DELETE FROM task
+                WHERE id = :id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        return $stmt->rowCount();
+    }
+}
+```
+
+## Restrict the tasks index endpoint to only show the authenticated user's tasks
+
+Inside `TaskController.php` add new integer argument for user id, prefixed with private 
+to promote it to a property.
+
+```php
+    public function __construct(private TaskGateway $gateway,
+                                private int $user_id)
+    {
+    }
+```
+
+Then in the front controller we pass the user id variable:
+
+```php
+$controller = new TaskController($task_gateway, $user_id);
+```
+
+In the `TaskGateway` class we should rename the `getAll` method to something more appropriate, e.g. `getAllForUser`,
+the add a WHERE clause to the query to restrict the response to the current user.
+
+```php
+    public function getAllForUser(int $user_id): array
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE user_id = :user_id
+                ORDER BY name";
+
+        // As we are using a prepared statement, we need to change the query statement
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+```
+
+## Restrict the rest of the task endpoints to the authenticated user's tasks
+
+`TaskGateway.php`
+
+```php
+<?php
+
+class TaskGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    // get all task records
+    // Now only for a specific user
+    public function getAllForUser(int $user_id): array
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE user_id = :user_id
+                ORDER BY name";
+
+        // As we are using a prepared statement, we need to change the query statement
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = [];
+
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $row['is_completed'] = (bool) $row['is_completed'];
+
+            $data[] = $row;
+        }
+
+        return $data;
+    }
+
+    public function getForUser(int $user_id, string $id): array | false
+    {
+        $sql = "SELECT *
+                FROM task
+                WHERE id = :id
+                AND user_id = :user_id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        $data = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($data !== false) {
+            $data['is_completed'] = (bool) $data['is_completed'];
+        }
+
+        return $data;
+    }
+
+    public function createForUser(int $user_id, array $data): string
+    {
+        $sql = "INSERT INTO task (name, priority, is_completed, user_id)
+                VALUES (:name, :priority, :is_completed, :user_id)";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":name", $data["name"], PDO::PARAM_STR);
+
+        // Priority is nullable and has to be treated as such
+
+        if (empty($data["priority"])) {
+
+            $stmt->bindValue(":priority", null, PDO::PARAM_NULL);
+
+        } else {
+
+            $stmt->bindValue(":priority", $data["priority"], PDO::PARAM_INT);
+
+        }
+
+        $stmt->bindValue(":is_completed", $data["is_completed"] ?? false, PDO::PARAM_BOOL);
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        return $this->conn->lastInsertId();
+    }
+
+    public function updateForUser(int $user_id, string $id, array $data): int
+    {
+        $fields = [];
+
+        if (!empty($data["name"])) {
+
+            $fields["name"] = [
+                $data["name"],
+                PDO::PARAM_STR
+            ];
+        }
+
+        if (array_key_exists("priority", $data)) {
+
+            $fields["priority"] = [
+                $data["priority"],
+                $data["priority"] === null ? PDO::PARAM_NULL : PDO::PARAM_INT
+            ];
+        }
+
+        if (array_key_exists("is_completed", $data)) {
+
+            $fields["is_completed"] = [
+                $data["is_completed"],
+                PDO::PARAM_BOOL
+            ];
+        }
+
+        if (empty($fields)) {
+
+            return 0;
+
+        } else {
+
+            $sets = array_map(function ($value) {
+
+                return "$value = :$value";
+
+            }, array_keys($fields));
+
+            $sql = "UPDATE task"
+                . " SET " . implode(", ", $sets)
+                . " WHERE id = :id"
+                . " AND user_id = :user_id";
+
+            $stmt = $this->conn->prepare($sql);
+
+            $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+            $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+            foreach ($fields as $name => $values) {
+                $stmt->bindValue(":$name", $values[0], $values[1]);
+            }
+            $stmt->execute();
+
+            return $stmt->rowCount();
+        }
+    }
+
+    public function deleteForUser(int $user_id, string $id): int
+    {
+        $sql = "DELETE FROM task
+                WHERE id = :id
+                AND user_id = :user_id";
+
+        $stmt = $this->conn->prepare($sql);
+
+        $stmt->bindValue(":id", $id, PDO::PARAM_INT);
+        $stmt->bindValue(":user_id", $user_id, PDO::PARAM_INT);
+
+        $stmt->execute();
+
+        return $stmt->rowCount();
+    }
+}
+```
+
+`TaskController.php`
+
+```php
+<?php
+
+class TaskController
+{
+
+    // Add new integer argument for user id, prefixed with private
+    // to promote it to a property.
+    public function __construct(private TaskGateway $gateway,
+                                private int $user_id)
+    {
+    }
+
+    public function processRequest(string $method, ?string $id): void
+    {
+         if ($id === null) {
+            if ($method == "GET") {
+
+                echo json_encode($this->gateway->getAllForUser($this->user_id));
+
+            } elseif ($method == "POST") {
+
+                $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                $errors = $this->getValidationErrors($data);
+
+                if (!empty($errors)) {
+                   $this->respondUnprocessableEntity($errors);
+                   return;
+                }
+
+                $id = $this->gateway->createForUser($this->user_id, $data);
+
+                $this->respondCreated($id);
+
+            } else {
+                $this->respondMethodNotAllowed("GET, POST");
+            }
+        } else {
+
+            $task = $this->gateway->getForUser($this->user_id, $id);
+
+            if ($task === false) {
+                $this->respondNotFound($id);
+                return;
+            }
+
+            switch ($method) {
+                case "GET":
+                    echo json_encode($task);
+                    break;
+
+                case "PATCH":
+                    $data = (array) json_decode(file_get_contents("php://input"), true);
+
+                    $errors = $this->getValidationErrors($data, false);
+
+                    if (!empty($errors)) {
+                        $this->respondUnprocessableEntity($errors);
+                        return;
+                    }
+
+                    // We now return the number of rows
+                    $rows = $this->gateway->updateForUser($this->user_id, $id, $data);
+                    echo json_encode(["message" => "Task updated", "rows" => $rows]);
+                    break;
+
+                case "DELETE":
+                    $rows = $this->gateway->deleteForUser($this->user_id, $id);
+                    echo json_encode(["message" => "Task deleted", "rows" => $rows]);
+                    break;
+
+                default:
+                    $this->respondMethodNotAllowed("GET, PATCH, DELETE");
+            }
+        }
+    }
+
+    private function respondUnprocessableEntity(array $errors): void
+    {
+        http_response_code(422);
+        echo json_encode(["errors" => $errors]);
+    }
+
+    private function respondMethodNotAllowed(string $allowed_methods): void
+    {
+
+        http_response_code(405);
+        header("Allow: $allowed_methods");
+
+    }
+
+    private function respondNotFound(string $id): void
+    {
+
+        http_response_code(404);
+        echo json_encode(["message" => "Task with ID $id not found"]);
+
+    }
+
+    public function respondCreated(string $id): void
+    {
+        http_response_code(201);
+        echo json_encode(["message" => "Task created", "id" => $id]);
+    }
+
+    private function getValidationErrors(array $data, bool $is_new = true): array
+    {
+        $errors = [];
+
+        // Now the name is only required if the record is new.
+        if ($is_new && empty($data["name"])) {
+
+            $errors[] = "Name is required"
+
+;        }
+
+        if (! empty($data["priority"])) {
+
+            if (filter_var($data["priority"], FILTER_VALIDATE_INT) === false) {
+
+                $errors[] = "Priority must be an integer";
+            }
+        }
+
+        return $errors;
+    }
+}
+```
+
+## Cache the database connection to avoid multiple connections in the same request
+
+Now that we are authenticating, we are using both the `UserGateway` and `TaskGateway` classes.
+We call the `getConnection` database method in both of these classes. This means that for any
+request to the index page, two database connections will be made. To avoid this we need to store
+the database connection in a property of the database class.
+
+`Database.php`
+
+```php
+<?php
+
+class Database
+{
+    private ?PDO $conn = null;
+    public function __construct(
+        private string $host,
+        private string $name,
+        private string $user,
+        private string $password
+    ) {
+
+    }
+
+    public function getConnection(): PDO
+    {
+        if ($this->conn === null){
+
+            $dsn = "mysql:host={$this->host};dbname={$this->name};charset=utf8";
+
+            $this->conn = new PDO($dsn, $this->user, $this->password, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_EMULATE_PREPARES => false,
+                PDO::ATTR_STRINGIFY_FETCHES => false,
+            ]);
+        }
+        // The first time this method is executed, the connection will be stored in the
+        // property. Subsequent calls of this method will return the value of the
+        // property, avoiding multiple connections to the same database in the same request.
+        
+        return $this->conn;
     }
 }
 ```
