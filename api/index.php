@@ -17,19 +17,16 @@ if ($resource != "tasks") {
     exit;
 }
 
-
-
 $database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
 
 $user_gateway = new UserGateway($database);
 
 $auth = new Auth($user_gateway);
 
-if ( ! $auth->authenticateAPIKey()) {
+if ( ! $auth->authenticateAccessToken()) {
     exit;
 }
 
-// AFTER authenticating API key get user's ID
 $user_id = $auth->getUserID();
 
 $task_gateway = new TaskGateway($database);
