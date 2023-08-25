@@ -3,3 +3,5 @@ RewriteCond %{REQUEST_FIELNAME} !-f
 RewriteCond %{REQUEST_FIELNAME} !-d
 RewriteCond %{REQUEST_FIELNAME} !-l
 RewriteRule . index.php [L]
+
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
