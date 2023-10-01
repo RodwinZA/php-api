@@ -3960,6 +3960,7 @@ class TaskController
 
                 $errors = $this->getValidationErrors($data);
 
+
                 if (!empty($errors)) {
                    $this->respondUnprocessableEntity($errors);
                    return;
@@ -4108,3 +4109,559 @@ class Database
     }
 }
 ```
+
+# An introduction to authentication using access tokens
+
+## An introduction to authentication using access tokens
+
+With the API Key method, we use the value of the API key to look up user records in the database with every request. This is not scalable, and therefore
+the alternative is to use access tokens.
+
+If a user has a valid login, the server responds with an access token, which is an encoded string that contains the user's data.
+Once the client has the access token, it sends it along with the request to the API for a resource. The API then decodes the token and retrieves
+the authenticated user's details.
+
+The access token contains the user's information, so we don't need to look it up in the database.
+This way we don't need to hit the database on every single request.
+In addition, we can have separate resources and authentication servers which would scale more easily.
+
+This, the main point of access tokens is that they can be used without database validation.
+
+## Create the login script and return 400 if the username and password are missing
+
+We start with the `login` endpoint inside the `api` folder. This endpoint will check the user's credentials and return an access token.
+
+Note that the `http://localhost:8000/api/login.php` endpoint is not RESTful. We could pass the request via a front controller to make it restful though.
+
+For now we will only output the response.
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+// Restrict the method used to call this endpoint
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+
+}
+
+// Gets and associative array of the json data passed in the API request
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if ( ! array_key_exists("username", $data) || ! array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+echo json_encode($data);
+
+```
+
+## Select the user record based on the username in the request
+
+Now that we have the username and password from the request, we can authenticate these using the database. We need to retrieve the user from the database based on the username.
+
+We will do this inside the `UserGateway` class:
+
+```php
+<?php
+
+class UserGateway
+{
+    private PDO $conn;
+
+    public function __construct(Database $database)
+    {
+        $this->conn = $database->getConnection();
+    }
+
+    public function getByAPIKey(string $key): array | false
+    {
+        // We only need the API key to authenticate the request so we
+        // don't use the password or username yet
+        $sql = "SELECT * FROM user WHERE api_key = :api_key";
+
+        $stmt = $this->conn->prepare($sql);
+        $stmt->bindValue(":api_key", $key, PDO::PARAM_STR);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    public function getByUsername(string $username): array | false
+    {
+        $sql = "SELECT * FROM user WHERE username = :username";
+
+        $stmt = $this->conn->prepare($sql);
+        $stmt->bindValue(":username", $username, PDO::PARAM_STR);
+        $stmt->execute();
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+}
+```
+
+Then inside of `login.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+// Restrict the method used to call this endpoint
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+
+}
+
+
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if ( ! array_key_exists("username", $data) || ! array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+$database = new Database(
+    $_ENV["DB_HOST"],
+    $_ENV["DB_NAME"],
+    $_ENV["DB_USER"],
+    $_ENV["DB_PASS"]
+);
+
+$user_gateway = new UserGateway($database);
+$user = $user_gateway->getByUsername($data["username"]);
+
+echo json_encode($user);
+
+```
+
+## Check the username and password and return a 401 status code if invalid
+
+We can now check the password and respond accordingly.
+
+Inside `login.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+// Restrict the method used to call this endpoint
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+
+}
+
+
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if ( ! array_key_exists("username", $data) || ! array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+$database = new Database(
+    $_ENV["DB_HOST"],
+    $_ENV["DB_NAME"],
+    $_ENV["DB_USER"],
+    $_ENV["DB_PASS"]
+);
+
+$user_gateway = new UserGateway($database);
+$user = $user_gateway->getByUsername($data["username"]);
+
+if ($user === false) {
+
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+
+}
+
+if ( ! password_verify($data["password"], $user["password_hash"]) ) {
+
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+
+}
+
+echo json_encode("Successful authentication");
+```
+
+## Generate an encoded access token containing the user credentials
+
+Once successfully authenticated, we can generate and return an access token.
+
+Inside `login.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+// Restrict the method used to call this endpoint
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+
+}
+
+
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if ( ! array_key_exists("username", $data) || ! array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+$database = new Database(
+    $_ENV["DB_HOST"],
+    $_ENV["DB_NAME"],
+    $_ENV["DB_USER"],
+    $_ENV["DB_PASS"]
+);
+
+$user_gateway = new UserGateway($database);
+$user = $user_gateway->getByUsername($data["username"]);
+
+if ($user === false) {
+
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+
+}
+
+if ( ! password_verify($data["password"], $user["password_hash"]) ) {
+
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+
+}
+
+$payload = [
+  "id" => $user["id"],
+  "name" => $user["name"]
+];
+
+// The access token will be a single string, so we can easily send it in a request header.
+
+$access_token = base64_encode(json_encode($payload));
+
+// Encoded in this string of characters now is the id and name of the logged-in user.
+
+echo json_encode([
+    "access_token" => $access_token
+]);
+```
+
+## Pass the access token to the task API endpoints in the authorization header
+
+Once we have an access token, we can use it to access endpoints in the API that require authentication.
+The first thing we need to do is to send this access token to the endpoint.
+
+Inside the front controller (`index.php`) we are currently using API-Key authentication.
+We pass the API key in a request using the `X_API_KEY` header.
+
+To use the access token instead, first,we should include the value of the access token in the request.
+Instead of using the `X_API_KEY` header it is standard practice to use the `Authorization` header when passing an access token.
+
+When using this header, we need to include a scheme or type which is a string that identifies the type of authorization. For
+access tokens the one to use is `Bearer`.
+
+Inside `.htaccess`
+
+```apacheconf
+RewriteEngine On
+RewriteCond %{REQUEST_FIELNAME} !-f
+RewriteCond %{REQUEST_FIELNAME} !-d
+RewriteCond %{REQUEST_FIELNAME} !-l
+RewriteRule . index.php [L]
+
+SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+```
+Inside `index.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+// In certain cases, Apache removes the authorization header before PHP can use it.
+// We can solve this by configuring the Apache htaccess file.
+var_dump($_SERVER["HTTP_AUTHORIZATION"]);
+exit;
+
+$auth = new Auth($user_gateway);
+
+if ( ! $auth->authenticateAPIKey()) {
+    exit;
+}
+
+// AFTER authenticating API key get user's ID
+$user_id = $auth->getUserID();
+
+$task_gateway = new TaskGateway($database);
+$controller = new TaskController($task_gateway, $user_id);
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+## Validate the access token and decode its contents
+
+We now have the value of the access token and can access its contents. We need to first do some validation inside the `Auth` class
+
+```php
+<?php
+
+class Auth
+{
+    // Store current user id
+    private int $user_id;
+    public function __construct(private UserGateway $user_gateway)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        $user = $this->user_gateway->getByAPIKey($api_key);
+
+        if ( $user === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+
+        $this->user_id = $user["id"];
+
+        return true;
+    }
+
+    public function getUserID(): int
+    {
+        return $this->user_id;
+    }
+
+    public function authenticateAccessToken(): bool
+    {
+        // Validate if the value of the header matches the authentication scheme
+        // we are using (Bearer)
+       if ( ! preg_match("/^Bearer\s+(.*)$/", $_SERVER["HTTP_AUTHORIZATION"], $matches) ) {
+           echo json_encode(["message" => "incomplete authorization header"]);
+           return false;
+
+       }
+
+       $plain_text = base64_decode($matches[1], true);
+
+       if ($plain_text === false) {
+
+           http_response_code(400);
+           echo json_encode(["message" => "invalid authorization header"]);
+           return false;
+       }
+
+       $data = json_decode($plain_text, true);
+
+       if ($data === null) {
+
+           http_response_code(400);
+           echo json_encode(["message" => "invalid JSON"]);
+           return false;
+       }
+
+       return true;
+    }
+}
+```
+
+Inside `index.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+$auth = new Auth($user_gateway);
+
+if ( ! $auth->authenticateAccessToken()) {
+    exit;
+}
+
+echo "valid authentication";
+exit;
+
+// AFTER authenticating API key get user's ID
+$user_id = $auth->getUserID();
+
+$task_gateway = new TaskGateway($database);
+$controller = new TaskController($task_gateway, $user_id);
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+## Get the authenticated user data from the access token
+
+Once the access token has been validated we can get the user information from it.
+
+```php
+<?php
+
+class Auth
+{
+    // Store current user id
+    private int $user_id;
+    public function __construct(private UserGateway $user_gateway)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        $user = $this->user_gateway->getByAPIKey($api_key);
+
+        if ( $user === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+
+        $this->user_id = $user["id"];
+
+        return true;
+    }
+
+    public function getUserID(): int
+    {
+        return $this->user_id;
+    }
+
+    public function authenticateAccessToken(): bool
+    {
+        // Validate if the value of the header matches the authentication scheme
+        // we are using (Bearer)
+       if ( ! preg_match("/^Bearer\s+(.*)$/", $_SERVER["HTTP_AUTHORIZATION"], $matches) ) {
+           echo json_encode(["message" => "incomplete authorization header"]);
+           return false;
+
+       }
+
+       $plain_text = base64_decode($matches[1], true);
+
+       if ($plain_text === false) {
+
+           http_response_code(400);
+           echo json_encode(["message" => "invalid authorization header"]);
+           return false;
+       }
+
+       $data = json_decode($plain_text, true);
+
+       if ($data === null) {
+
+           http_response_code(400);
+           echo json_encode(["message" => "invalid JSON"]);
+           return false;
+       }
+
+       // We get the user data directly from the access token
+
+       $this->user_id = $data["id"];
+
+       return true;
+    }
+}
+```
+
+As base64 is a readily available encoding scheme, it is easy to manipulate access tokens in this way. We will now
+look at more secure ways.
