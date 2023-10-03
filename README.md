@@ -4665,3 +4665,713 @@ class Auth
 
 As base64 is a readily available encoding scheme, it is easy to manipulate access tokens in this way. We will now
 look at more secure ways.
+
+## Authentication using JSON Web Tokens (JWTs)
+
+### An introduction to JSON web tokens
+
+Authentication using access tokens is better than using an API key as we do not need to hit the database for
+every request. Base64 encoding is not very secure as this can be easily forged, therefore we need to learn
+about JSON Web Tokens.
+
+The JWT standard defines a way to securely encode data in a token that's URL-friendly but also can't
+be forged, as it's digitally signed.
+
+So what is a JWT? A JWT is a string that consists of three parts:
+- The middle part is created in a similar way as to how we created the access token
+- in the previous section, some JSON containing data about a user encoded using base64 url encoding.
+- This is known as the *payload*.
+
+- The first part is the *header*. This is some JSON that contains the type of the token (which is JWT)
+- and the algorithm used to create the signature. This is also encoded using base64 url encoding.
+
+- The last part of the string is the *signature*. This is formed by creating a hash of the payload
+- and the header then base64 url encoding that.
+
+These three parts are separated by dots (.)
+
+The data stored in the payload can't be forged because if we change it the signature won't match. This is
+why it is better to use JSON web tokens for authentication.
+
+### Crate a class to encode a payload in JWT
+
+There are existing packages for creating JWTs, but because they are straightforward, we will develop ours
+from scratch.
+
+Inside the `src` folder create a new file called `JWTCodec.php`:
+
+```php
+<?php
+
+class JWTCodec
+{
+    public function encode(array $payload): string
+    {
+        // The header typically contains these two elements
+        $header = json_encode([
+            "typ" => "JWT",
+            "alg" => "HS256" // hmac with the sha256 algorithm
+        ]);
+
+        $header = $this->base64urlEncode($header);
+
+        $payload = json_encode($payload);
+        $payload = $this->base64urlEncode($payload);
+
+        // We need to create the signature based on the header and payload values.
+        // We will do that using the hash_hmac function. According to the standard, the
+        // secret key needs to be at least the same size as the hash output. (256bits in this case)
+        // We will use an online generator to get a random key, and pass true as the final
+        // value to get a binary value.
+
+        $signature = hash_hmac("sha256",
+                                $header . "." . $payload,
+                               "e73f96957788f855007c5e92020f48dff721cd612b6926ec699d958aaa1ed070",
+                                true);
+
+        $signature = $this->base64urlEncode($signature);
+
+        return $header . "." . $payload . "." . $signature;
+    }
+
+
+    // To form the first part of the token, we need to encode the JSON using base64 url encoding.
+    // Base64 url encoding is just url-safe base64 encoding where plus signs are replaced by
+    // hyphens and forward slashes are replaced by underscores. The equal signs used as padding at
+    // the end are also removed.
+    // PHP does not contain a built-in function to do this yet, so we will create our own.
+    private function base64urlEncode(string $text): string
+    {
+        return str_replace(
+            ["+", "/", "="],
+            ["-", "_", ""],
+            base64_encode($text)
+        );
+    }
+}
+
+```
+
+We can also test this in an interactive PHP shell by typing `php -a` in the terminal and running
+
+```php
+$payload = ["id" => 123];
+require "src/JWTCodec.php";
+$codec = new JWTCodec;
+echo $codec->encode($payload);
+
+```
+
+The output from the interactive shell will contain our token, e.g.
+`eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpZCI6MTIzfQ.jH3P-xC0Tw9ixoUo9xjfq3Kht3V5N7HrGhcCcHArW0M`
+
+### Generate a JWT access token in the login endpoint containing JWT claims
+
+We now have a class that generates a JWT, so we can change the login page to generate one instead of a
+regular access token.
+
+Inside `api/login.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+}
+
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if (!array_key_exists("username", $data) ||
+    !array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+$user = $user_gateway->getByUsername($data["username"]);
+
+if ($user === false) {
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+}
+
+if (!password_verify($data["password"], $user["password_hash"])) {
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+}
+
+// In JWT the indexes for the items in the payload needs to be specific values.
+// These are known as JWT Claims. The specification defines a list of standard names
+// known as registered claims. You can include as many of the claims that you need in the JWT
+// as well as add your own.
+
+$payload = [
+    "sub" => $user["id"],
+    "name" => $user["name"]
+];
+
+// Here we replace the simple base64 encoding with a JWT
+$codec = new JWTCodec;
+$access_token = $codec->encode($payload);
+
+echo json_encode([
+   "access_token" => $access_token
+]);
+
+```
+
+ ### Add a method to decode the payload from the JWT
+
+We can now decode our JWT access token and retrieve its contents.
+
+```php
+<?php
+
+class JWTCodec
+{
+    public function encode(array $payload): string
+    {
+        $header = json_encode([
+            "typ" => "JWT",
+            "alg" => "HS256"
+        ]);
+
+        $header = $this->base64urlEncode($header);
+
+        $payload = json_encode($payload);
+        $payload = $this->base64urlEncode($payload);
+
+        $signature = hash_hmac("sha256",
+            $header . "." . $payload,
+            "e73f96957788f855007c5e92020f48dff721cd612b6926ec699d958aaa1ed070",
+            true);
+
+        $signature = $this->base64urlEncode($signature);
+
+        return $header . "." . $payload . "." . $signature;
+    }
+
+    public function decode(string $token)
+    {
+        // The matches array will contain an element each for header, payload and signature
+        if (preg_match("/^(?<header>.+)\.(?<payload>.+)\.(?<signature>.+)$/", $token, $matches) !== 1) {
+            throw new \http\Exception\InvalidArgumentException("invalid token format");
+        }
+
+        // We calculate the signature based on the values from the token
+        // which are in the matches array.
+        $signature = hash_hmac("sha256",
+            $matches["header"] . "." . $matches["payload"],
+            "e73f96957788f855007c5e92020f48dff721cd612b6926ec699d958aaa1ed070",
+            true);
+
+        $signature_from_token = $this->base64urlDecode($matches["signature"]);
+
+        if (!hash_equals($signature, $signature_from_token)) {
+            throw new Exception("signature does not match");
+        }
+
+        $payload = json_decode($this->base64urlDecode($matches["payload"]), true);
+
+        return $payload;
+    }
+
+    private function base64urlEncode(string $text): string
+    {
+        return str_replace(
+            ["+", "/", "="],
+            ["-", "_", ""],
+            base64_encode($text)
+        );
+    }
+
+    private function base64urlDecode(string $text)
+    {
+        return base64_decode(str_replace(
+                ["-" . "_"],
+                ["+", "/"],
+                $text)
+        );
+    }
+}
+
+```
+
+We can also use the interactive shell to test decoding
+
+```php
+
+C:\Users\rodwi\Documents\php-api>php -a
+Interactive shell
+
+require "src/JWTCodec.php";
+$codec = new JWTCodec;
+$token = $codec->encode(["id" => 123]);
+echo $token;
+
+// eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpZCI6MTIzfQ.jH3P-xC0Tw9ixoUo9xjfq3Kht3V5N7HrGhcCcHArW0M
+
+$payload = $codec->decode($token);
+print_r($payload);
+//Array
+//(
+//    [id] => 123
+//)
+```
+
+### Pass in the secret key used for hashing as a dependency
+
+In the JWTCodec class we generate a hash in two places, int both the encode and decode methods, using the
+same hardcoded key. In addition to removing the duplication it would be better to pass the secret key in
+as a dependency so that it could be easily changed instead of modifying the class directly.
+
+First we'll add a constructor to `JWTCodec.php` to store our key. Then we will move the key to our `.env` file,
+call it `SECRET_KEY` and replace the hardcoded key in our code and pass the environment variable to where
+we call the class inside of `login.php`.
+
+```php
+<?php
+
+class JWTCodec
+{
+
+    public function __construct(private string $key)
+    {
+    }
+
+    public function encode(array $payload): string
+    {
+        $header = json_encode([
+            "typ" => "JWT",
+            "alg" => "HS256"
+        ]);
+
+        $header = $this->base64urlEncode($header);
+
+        $payload = json_encode($payload);
+        $payload = $this->base64urlEncode($payload);
+
+        $signature = hash_hmac("sha256",
+            $header . "." . $payload,
+            $this->key,
+            true);
+
+        $signature = $this->base64urlEncode($signature);
+
+        return $header . "." . $payload . "." . $signature;
+    }
+
+    public function decode(string $token): array
+    {
+        // The matches array will contain an element each for header, payload and signature
+        if (preg_match("/^(?<header>.+)\.(?<payload>.+)\.(?<signature>.+)$/", $token, $matches) !== 1) {
+            throw new \http\Exception\InvalidArgumentException("invalid token format");
+        }
+
+        // We calculate the signature based on the values from the token
+        // which are in the matches array.
+        $signature = hash_hmac("sha256",
+            $matches["header"] . "." . $matches["payload"],
+            $this->key,
+            true);
+
+        $signature_from_token = $this->base64urlDecode($matches["signature"]);
+
+        if (!hash_equals($signature, $signature_from_token)) {
+            throw new Exception("signature does not match");
+        }
+
+        $payload = json_decode($this->base64urlDecode($matches["payload"]), true);
+
+        return $payload;
+    }
+
+    private function base64urlEncode(string $text): string
+    {
+        return str_replace(
+            ["+", "/", "="],
+            ["-", "_", ""],
+            base64_encode($text)
+        );
+    }
+
+    private function base64urlDecode(string $text): string
+    {
+        return base64_decode(str_replace(
+                ["-", "_"],
+                ["+", "/"],
+                $text)
+        );
+    }
+}
+
+
+```
+
+In `login.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    http_response_code(405);
+    header("Allow: POST");
+    exit;
+}
+
+$data = (array) json_decode(file_get_contents("php://input"), true);
+
+if (!array_key_exists("username", $data) ||
+    !array_key_exists("password", $data)) {
+
+    http_response_code(400);
+    echo json_encode(["message" => "missing login credentials"]);
+    exit;
+}
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+$user = $user_gateway->getByUsername($data["username"]);
+
+if ($user === false) {
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+}
+
+if (!password_verify($data["password"], $user["password_hash"])) {
+    http_response_code(401);
+    echo json_encode(["message" => "invalid authentication"]);
+    exit;
+}
+
+$payload = [
+    "sub" => $user["id"],
+    "name" => $user["name"]
+];
+
+$codec = new JWTCodec($_ENV["SECRET_KEY"]);
+$access_token = $codec->encode($payload);
+
+echo json_encode([
+   "access_token" => $access_token
+]);
+
+```
+
+### Authenticate the task endpoints using the JWT
+
+The login page now generates a JWT access token. That means we can change the `index` page to authenticate access using this JWT.
+
+Inside `Auth.php`
+
+```php
+<?php
+
+class Auth
+{
+    // Store current user id
+    private int $user_id;
+    public function __construct(private UserGateway $user_gateway, private JWTCodec $codec)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        // Instead of comparing the return value directly, we assign the
+        // value to a variable and return that.
+
+        $user = $this->user_gateway->getByAPIKey($api_key);
+
+        if ( $user === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+
+        // If auth is successful, assign user_id to the property
+        $this->user_id = $user["id"];
+
+        return true;
+    }
+
+    public function getUserID(): int
+    {
+        return $this->user_id;
+    }
+
+    public function authenticateAccessToken(): bool
+    {
+        if (! preg_match("/^Bearer\s+(.*)$/", $_SERVER["HTTP_AUTHORIZATION"], $matches)) {
+            http_response_code(400);
+            echo json_encode(["message" => "incomplete authorization header"]);
+            return false;
+        }
+
+        try {
+            $data = $this->codec->decode($matches[1]); // returns the payload
+        } catch (Exception $e) {
+            http_response_code(400);
+            echo json_encode(["message" => $e->getMessage()]);
+            return false;
+        }
+
+        $this->user_id = $data["sub"];
+
+        return true;
+    }
+}
+```
+
+And in `index.php`
+
+```php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . "/bootstrap.php";
+
+$path =  parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+
+$parts = explode("/", $path);
+
+$resource = $parts[2];
+
+$id = $parts[3] ?? null;
+
+if ($resource != "tasks") {
+    http_response_code(404);
+    exit;
+}
+
+$database = new Database($_ENV["DB_HOST"], $_ENV["DB_NAME"], $_ENV["DB_USER"], $_ENV["DB_PASS"]);
+
+$user_gateway = new UserGateway($database);
+
+$codec = new JWTCodec($_ENV["SECRET_KEY"]);
+
+$auth = new Auth($user_gateway, $codec);
+
+if ( ! $auth->authenticateAccessToken()) {
+    exit;
+}
+
+$user_id = $auth->getUserID();
+
+$task_gateway = new TaskGateway($database);
+$controller = new TaskController($task_gateway, $user_id);
+$controller->processRequest($_SERVER['REQUEST_METHOD'], $id);
+```
+
+We can test this by first logging in and getting the JWT then trying to access a user's data using httpie, e.g.
+
+`http http://localhost:8000/api/tasks "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOjYsIm5hbWUiOiJqYWtlIn0.2sWLkWigHddQ2mN91LEw5KpI02bqlwv7VLvX38ALvSk"`
+
+### Use a custom exception class to return a 401 if the signature is invalid
+
+When making a request with an invalid signature we get a 400 response code, which in reality should be
+a `401 Unauthorized` status code. We throw a standard exception inside `JWTCodec.php` but we will change it to a custom one.
+
+Inside `src` folder create a file called `InvalidSignatureException.php`
+
+```php
+<?php
+
+class InvalidSignatureException extends Exception
+{
+
+}
+```
+
+This is all we need as extending the base class is enough to provide the functionality we need.
+
+We use this in `JWTCodec.php`
+```php
+<?php
+
+class JWTCodec
+{
+
+    public function __construct(private string $key)
+    {
+    }
+
+    public function encode(array $payload): string
+    {
+        $header = json_encode([
+            "typ" => "JWT",
+            "alg" => "HS256"
+        ]);
+
+        $header = $this->base64urlEncode($header);
+
+        $payload = json_encode($payload);
+        $payload = $this->base64urlEncode($payload);
+
+        $signature = hash_hmac("sha256",
+            $header . "." . $payload,
+            $this->key,
+            true);
+
+        $signature = $this->base64urlEncode($signature);
+
+        return $header . "." . $payload . "." . $signature;
+    }
+
+    public function decode(string $token): array
+    {
+        // The matches array will contain an element each for header, payload and signature
+        if (preg_match("/^(?<header>.+)\.(?<payload>.+)\.(?<signature>.+)$/", $token, $matches) !== 1) {
+            throw new \http\Exception\InvalidArgumentException("invalid token format");
+        }
+
+        // We calculate the signature based on the values from the token
+        // which are in the matches array.
+        $signature = hash_hmac("sha256",
+            $matches["header"] . "." . $matches["payload"],
+            $this->key,
+            true);
+
+        $signature_from_token = $this->base64urlDecode($matches["signature"]);
+
+        if (!hash_equals($signature, $signature_from_token)) {
+            throw new InvalidSignatureException;
+        }
+
+        $payload = json_decode($this->base64urlDecode($matches["payload"]), true);
+
+        return $payload;
+    }
+
+    private function base64urlEncode(string $text): string
+    {
+        return str_replace(
+            ["+", "/", "="],
+            ["-", "_", ""],
+            base64_encode($text)
+        );
+    }
+
+    private function base64urlDecode(string $text): string
+    {
+        return base64_decode(str_replace(
+                ["-", "_"],
+                ["+", "/"],
+                $text)
+        );
+    }
+}
+
+```
+
+and add another catch to the `try...catch` in `Auth.php`
+
+```php
+<?php
+
+class Auth
+{
+    // Store current user id
+    private int $user_id;
+    public function __construct(private UserGateway $user_gateway, private JWTCodec $codec)
+    {
+    }
+    public function authenticateAPIKey(): bool
+    {
+        if (empty($_SERVER["HTTP_X_API_KEY"])) {
+
+            http_response_code(400);
+            echo json_encode(["message" => "Missing API key"]);
+            return false;
+        }
+
+        $api_key = $_SERVER["HTTP_X_API_KEY"];
+
+        // Instead of comparing the return value directly, we assign the
+        // value to a variable and return that.
+
+        $user = $this->user_gateway->getByAPIKey($api_key);
+
+        if ( $user === false) {
+
+            http_response_code(401);
+            echo json_encode(["message" => "Invalid API Key"]);
+            return false;
+        }
+
+        // If auth is successful, assign user_id to the property
+        $this->user_id = $user["id"];
+
+        return true;
+    }
+
+    public function getUserID(): int
+    {
+        return $this->user_id;
+    }
+
+    public function authenticateAccessToken(): bool
+    {
+        if (! preg_match("/^Bearer\s+(.*)$/", $_SERVER["HTTP_AUTHORIZATION"], $matches)) {
+            http_response_code(400);
+            echo json_encode(["message" => "incomplete authorization header"]);
+            return false;
+        }
+
+        try {
+            $data = $this->codec->decode($matches[1]); // returns the payload
+        } catch (InvalidSignatureException) {
+            http_response_code(401);
+            echo json_encode(["message" => "invalid signature"]);
+            return false;
+        }
+        catch (Exception $e) {
+            http_response_code(400);
+            echo json_encode(["message" => $e->getMessage()]);
+            return false;
+        }
+
+        $this->user_id = $data["sub"];
+
+        return true;
+    }
+}
+
+```
+
+### Don't store sensitive data in the JWT
+
+It is important to realize that the data inside a JWT is only encoded and not encrypted. Anyone with
+access to the token can easily view the data it contains.
+
+There are many online tools available to decode base64 that's why we shouldn't store sensitive data in 
+the payload of the token.
+
+Although it can be easily decoded, we cannot change it as the signature won't match.
