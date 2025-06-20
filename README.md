@@ -1,4 +1,4 @@
-~~_# Create a RESTful API: build a framework for serving the API
+# Create a RESTful API: build a framework for serving the API
 
 ## Start writing the API: enable URL rewriting
 
